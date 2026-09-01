@@ -108,7 +108,7 @@
   const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InV5bXd2cWRoamtsbWlwbmV5aWdjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODgyMTgzMzYsImV4cCI6MjEwMzc5NDMzNn0.BqeSIiXYflnwVt5uUSG7cOB7f4Y0iZqehjccN_Winx4";
   // ----------------------------------------------------------------
 
-  const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
   let allRows = [];
 
@@ -134,7 +134,7 @@
   async function loadData() {
     const status = document.getElementById("status");
     status.textContent = "Loading...";
-    const { data, error } = await supabase
+    const { data, error } = await supabaseClient
       .from("battery_readings")
       .select("*")
       .order("captured_at", { ascending: false });
