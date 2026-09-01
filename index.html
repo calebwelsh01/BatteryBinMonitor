@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>BatteryBin Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root {
+    --bg: #0f1115;
+    --card: #171a21;
+    --border: #2a2e37;
+    --text: #e8e9ec;
+    --muted: #9aa0ab;
+    --accent: #5eead4;
+    --bad: #f87171;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 24px;
+  }
+  header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  h1 { font-size: 1.4rem; margin: 0; }
+  #status { color: var(--muted); font-size: 0.85rem; }
+  #search {
+    background: var(--card);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 8px 12px;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    width: 220px;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 16px;
+  }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  .card img {
+    width: 100%;
+    aspect-ratio: 4 / 3;
+    object-fit: cover;
+    background: #000;
+    display: block;
+  }
+  .card-body { padding: 12px 14px; }
+  .type {
+    font-size: 1.05rem;
+    font-weight: 600;
+    margin: 0 0 4px 0;
+  }
+  .not-battery .type { color: var(--bad); }
+  .filename {
+    font-size: 0.75rem;
+    color: var(--muted);
+    word-break: break-all;
+    margin: 0 0 6px 0;
+  }
+  .reasoning {
+    font-size: 0.8rem;
+    color: var(--muted);
+    margin: 0 0 6px 0;
+    line-height: 1.3;
+  }
+  .timestamp {
+    font-size: 0.72rem;
+    color: var(--muted);
+  }
+  .empty {
+    color: var(--muted);
+    padding: 40px;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>🔋 BatteryBin Dashboard</h1>
+  <input id="search" type="text" placeholder="Filter by battery type..." />
+  <div id="status">Loading...</div>
+</header>
+
+<div id="grid" class="grid"></div>
+
+<script>
+  // ---- Configure these two values for your Supabase project ----
+  const SUPABASE_URL = "https://uymwvqdhjklmipneyigc.supabase.co";
+  const SUPABASE_ANON_KEY = "sb_publishable_mTtLftq88t80MjhKObNyJw_CkembRxZ";
+  // ----------------------------------------------------------------
+
+  const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+  let allRows = [];
+
+  function render(rows) {
+    const grid = document.getElementById("grid");
+    if (rows.length === 0) {
+      grid.innerHTML = `<div class="empty">No readings yet.</div>`;
+      return;
+    }
+    grid.innerHTML = rows.map(r => `
+      <div class="card ${r.is_battery ? "" : "not-battery"}">
+        <img src="${r.photo_url}" alt="${r.photo_filename}" loading="lazy" />
+        <div class="card-body">
+          <p class="type">${r.is_battery ? r.battery_type : "Not a battery"}</p>
+          <p class="filename">${r.photo_filename}</p>
+          ${r.reasoning ? `<p class="reasoning">${r.reasoning}</p>` : ""}
+          <p class="timestamp">${new Date(r.captured_at || r.uploaded_at).toLocaleString()}</p>
+        </div>
+      </div>
+    `).join("");
+  }
+
+  async function loadData() {
+    const status = document.getElementById("status");
+    status.textContent = "Loading...";
+    const { data, error } = await supabase
+      .from("battery_readings")
+      .select("*")
+      .order("captured_at", { ascending: false });
+
+    if (error) {
+      status.textContent = "Error loading data";
+      console.error(error);
+      return;
+    }
+
+    allRows = data;
+    render(allRows);
+    status.textContent = `${data.length} reading${data.length === 1 ? "" : "s"} · updated ${new Date().toLocaleTimeString()}`;
+  }
+
+  document.getElementById("search").addEventListener("input", (e) => {
+    const q = e.target.value.trim().toLowerCase();
+    const filtered = q
+      ? allRows.filter(r => (r.battery_type || "").toLowerCase().includes(q))
+      : allRows;
+    render(filtered);
+  });
+
+  loadData();
+  // Refresh automatically every 60 seconds so new syncs show up without a manual reload.
+  setInterval(loadData, 60000);
+</script>
+
+</body>
+</html>
