@@ -19,7 +19,7 @@ def run_identify_battery(ser):
         ser.write(b"UPLOAD_START\n")
 
         result = subprocess.run(
-            ["python3", "identify_battery.py", "--upload"],
+            ["python3", "identify_battery.py", "--camera", "0", "--camera2", "2", "--upload"],
             capture_output=True, text=True, timeout=30
         )
 
