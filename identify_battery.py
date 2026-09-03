@@ -2,13 +2,17 @@
 """
 Battery Identifier
 -------------------
-Captures a photo from your webcam using OpenCV, sends it to the OpenAI
-Vision API (GPT-4o / GPT-4o-mini), and asks the model to identify:
-  - whether the image contains a battery at all (True/False)
+Captures photo(s) from one or two webcams using OpenCV. Both photos (if
+two cameras are used) are sent to the OpenAI Vision API (GPT-4o /
+GPT-4o-mini) together in a single request for better identification
+accuracy, but only the PRIMARY (first camera's) photo is uploaded to the
+Supabase dashboard - the dashboard/table schema is unchanged from the
+single-camera version. The model identifies:
+  - whether the image(s) contain a battery at all (True/False)
   - the battery type (e.g. AA, AAA, 9V, CR2032 coin cell, 18650 Li-ion, etc.)
 
 Results are written to an XML file containing the battery type and the
-photo filename.
+photo filename(s).
 
 Setup:
     pip install opencv-python openai
@@ -27,15 +31,15 @@ Setup:
     or pass the key directly with --api-key.
 
 Usage:
-    python identify_battery.py
-    python identify_battery.py --camera 1       # use a different camera index
-    python identify_battery.py --image path.jpg # skip webcam, use existing image
+    python identify_battery.py                       # single camera (index 0)
+    python identify_battery.py --camera 0 --camera2 2 # two cameras, indices 0 and 2
+    python identify_battery.py --image a.jpg --image2 b.jpg  # two existing images
     python identify_battery.py --xml-output result.xml  # custom XML output path
 
-    # Also push this result straight to the hosted dashboard (requires
-    # pip install supabase, and SUPABASE_URL / SUPABASE_KEY set as env vars
-    # or passed via --supabase-url / --supabase-key). Use the service_role
-    # key here, the same one the standalone uploader script uses.
+    # Also push the PRIMARY photo + result straight to the hosted dashboard
+    # (requires pip install supabase, and SUPABASE_URL / SUPABASE_KEY set as
+    # env vars or passed via --supabase-url / --supabase-key). Use the
+    # service_role key here, the same one the standalone uploader script uses.
     python identify_battery.py --upload
 """
 
@@ -60,6 +64,7 @@ def capture_webcam_photo(
     autofocus: bool = None,
     focus: int = None,
     brightness: int = None,
+    label: str = "",
 ) -> str:
     """Capture a single photo from the webcam and save it to disk.
 
@@ -81,6 +86,9 @@ def capture_webcam_photo(
         Only meaningful when autofocus is False. Ignored otherwise.
     brightness: brightness value (driver-specific range, often roughly
         0-255 or -64 to 64 depending on the camera).
+    label: optional tag (e.g. "cam1", "cam2") inserted into the default
+        filename so captures from multiple cameras in the same run don't
+        overwrite each other.
 
     Support for these controls varies by OS/driver - some webcams or
     backends silently ignore properties they don't support.
@@ -95,7 +103,7 @@ def capture_webcam_photo(
     if not cap.isOpened():
         raise RuntimeError(
             f"Could not open camera index {camera_index}. "
-            "Try a different --camera index, or check camera permissions."
+            "Try a different --camera/--camera2 index, or check camera permissions."
         )
 
     if sys.platform.startswith("linux"):
@@ -117,7 +125,7 @@ def capture_webcam_photo(
     actual_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fourcc_int = int(cap.get(cv2.CAP_PROP_FOURCC))
     fourcc_str = "".join(chr((fourcc_int >> 8 * i) & 0xFF) for i in range(4)) if fourcc_int else "?"
-    print(f"Camera resolution: {actual_width}x{actual_height} (format: {fourcc_str})")
+    print(f"Camera {camera_index} resolution: {actual_width}x{actual_height} (format: {fourcc_str})")
 
     if autofocus is not None:
         ok = cap.set(cv2.CAP_PROP_AUTOFOCUS, 1 if autofocus else 0)
@@ -139,13 +147,14 @@ def capture_webcam_photo(
         ret, frame = cap.read()
         if not ret:
             cap.release()
-            raise RuntimeError("Failed to read frame from webcam.")
+            raise RuntimeError(f"Failed to read frame from webcam (camera index {camera_index}).")
 
     cap.release()
 
     if save_path is None:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        save_path = f"battery_photo_{timestamp}.jpg"
+        suffix = f"_{label}" if label else ""
+        save_path = f"battery_photo{suffix}_{timestamp}.jpg"
 
     cv2.imwrite(save_path, frame)
     print(f"Photo captured and saved to: {save_path}")
@@ -157,45 +166,62 @@ def encode_image_to_base64(image_path: str) -> str:
         return base64.b64encode(f.read()).decode("utf-8")
 
 
-def identify_battery(image_path: str, api_key: str = None) -> dict:
-    """Send the image to OpenAI's vision-capable model and return a dict with:
+def identify_battery(image_paths, api_key: str = None) -> dict:
+    """Send one or more images to OpenAI's vision-capable model and return a dict with:
         - is_battery (bool)
         - battery_type (str)
         - reasoning (str)
+
+    image_paths: a single path (str) or a list of paths. When multiple images
+    are given, they are all included in the same request so the model can
+    cross-reference different angles/views of the same battery.
     """
+    if isinstance(image_paths, str):
+        image_paths = [image_paths]
+
     client = OpenAI(api_key=api_key) if api_key else OpenAI()
 
-    b64_image = encode_image_to_base64(image_path)
+    if len(image_paths) > 1:
+        prompt = (
+            "You are looking at multiple photos, possibly of the SAME battery "
+            "taken from different angles/cameras. Use all images together to "
+            "determine whether they show a battery, and if so, what type.\n\n"
+            "Respond with ONLY a JSON object (no markdown fences, no extra text) "
+            "in exactly this format:\n"
+            '{\n'
+            '  "is_battery": true or false,\n'
+            '  "battery_type": "the battery type if is_battery is true (e.g. AA, '
+            '9V, CR2032), or \\"unknown\\" if unclear, or \\"none\\" if not a '
+            'battery",\n'
+            '  "reasoning": "brief explanation, noting details from each image '
+            'if relevant (e.g. a label only visible from one angle)"\n'
+            '}'
+        )
+    else:
+        prompt = (
+            "Is this a battery? If so, what type?\n\n"
+            "Respond with ONLY a JSON object (no markdown fences, no extra text) "
+            "in exactly this format:\n"
+            '{\n'
+            '  "is_battery": true or false,\n'
+            '  "battery_type": "the battery type if is_battery is true (e.g. AA, '
+            '9V, CR2032), or \\"unknown\\" if unclear, or \\"none\\" if not a '
+            'battery",\n'
+            '  "reasoning": "brief explanation"\n'
+            '}'
+        )
 
-    prompt = (
-        "Is this a battery? If so, what type?\n\n"
-        "Respond with ONLY a JSON object (no markdown fences, no extra text) "
-        "in exactly this format:\n"
-        '{\n'
-        '  "is_battery": true or false,\n'
-        '  "battery_type": "the battery type if is_battery is true (e.g. AA, '
-        '9V, CR2032), or \\"unknown\\" if unclear, or \\"none\\" if not a '
-        'battery",\n'
-        '  "reasoning": "brief explanation"\n'
-        '}'
-    )
+    content = [{"type": "text", "text": prompt}]
+    for path in image_paths:
+        b64_image = encode_image_to_base64(path)
+        content.append({
+            "type": "image_url",
+            "image_url": {"url": f"data:image/jpeg;base64,{b64_image}"},
+        })
 
     response = client.chat.completions.create(
         model="gpt-4o-mini",  # use "gpt-4o" for higher accuracy if desired
-        messages=[
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt},
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:image/jpeg;base64,{b64_image}"
-                        },
-                    },
-                ],
-            }
-        ],
+        messages=[{"role": "user", "content": content}],
         max_tokens=300,
         response_format={"type": "json_object"},
     )
@@ -224,15 +250,21 @@ def identify_battery(image_path: str, api_key: str = None) -> dict:
     }
 
 
-def write_result_xml(image_path: str, result: dict, xml_path: str) -> str:
+def write_result_xml(image_paths, result: dict, xml_path: str) -> str:
     """Write the identification result to an XML file.
 
     Includes whether a battery was detected, the battery type, and the
-    photo filename. Returns the path to the written XML file.
+    photo filename(s) (one <PhotoFilename> element per image). Returns the
+    path to the written XML file.
     """
+    if isinstance(image_paths, str):
+        image_paths = [image_paths]
+
     root = ET.Element("BatteryIdentification")
 
-    ET.SubElement(root, "PhotoFilename").text = os.path.basename(image_path)
+    for path in image_paths:
+        ET.SubElement(root, "PhotoFilename").text = os.path.basename(path)
+
     ET.SubElement(root, "IsBattery").text = str(result["is_battery"]).lower()
     ET.SubElement(root, "BatteryType").text = result["battery_type"]
     ET.SubElement(root, "Reasoning").text = result["reasoning"]
@@ -286,16 +318,18 @@ def upload_to_dashboard(image_path: str, result: dict, captured_at: str, supabas
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Identify a battery type from a webcam photo.")
-    parser.add_argument("--camera", type=int, default=0, help="Webcam device index (default: 0)")
-    parser.add_argument("--resolution", type=str, default=None, help="Manual capture resolution as WIDTHxHEIGHT (e.g. 1920x1080). Default: request the camera's maximum supported resolution.")
-    parser.add_argument("--autofocus", type=str, choices=["on", "off"], default=None, help="Force autofocus on or off. Default: leave camera's current setting untouched.")
+    parser = argparse.ArgumentParser(description="Identify a battery type from webcam photo(s).")
+    parser.add_argument("--camera", type=int, default=0, help="Primary webcam device index (default: 0)")
+    parser.add_argument("--camera2", type=int, default=None, help="Optional second webcam device index for a better/second view (sent to GPT, not uploaded)")
+    parser.add_argument("--resolution", type=str, default=None, help="Manual capture resolution as WIDTHxHEIGHT (e.g. 1920x1080), applied to both cameras. Default: request each camera's maximum supported resolution.")
+    parser.add_argument("--autofocus", type=str, choices=["on", "off"], default=None, help="Force autofocus on or off (both cameras). Default: leave camera's current setting untouched.")
     parser.add_argument("--focus", type=int, default=None, help="Manual focus value (driver-specific range, often ~0-255). Only applied when --autofocus off is also set.")
     parser.add_argument("--brightness", type=int, default=None, help="Brightness value (driver-specific range, often ~0-255 or -64 to 64).")
     parser.add_argument("--image", type=str, default=None, help="Path to an existing image instead of using the webcam")
+    parser.add_argument("--image2", type=str, default=None, help="Path to a second existing image (used with --image; sent to GPT, not uploaded)")
     parser.add_argument("--api-key", type=str, default=None, help="OpenAI API key (defaults to OPENAI_API_KEY env var)")
-    parser.add_argument("--xml-output", type=str, default=None, help="Path to write the result XML file (default: <image_basename>.xml)")
-    parser.add_argument("--upload", action="store_true", help="Also push this result straight to the hosted Supabase dashboard (requires pip install supabase)")
+    parser.add_argument("--xml-output", type=str, default=None, help="Path to write the result XML file (default: <primary_image_basename>.xml)")
+    parser.add_argument("--upload", action="store_true", help="Also push the PRIMARY photo + result straight to the hosted Supabase dashboard (requires pip install supabase)")
     parser.add_argument("--supabase-url", type=str, default=None, help="Supabase project URL (defaults to SUPABASE_URL env var; only needed with --upload)")
     parser.add_argument("--supabase-key", type=str, default=None, help="Supabase service_role key (defaults to SUPABASE_KEY env var; only needed with --upload)")
     args = parser.parse_args()
@@ -310,13 +344,20 @@ def main():
         sys.exit(1)
 
     try:
+        image_paths = []
+
         if args.image:
-            image_path = args.image
-            if not os.path.isfile(image_path):
-                print(f"ERROR: Image not found: {image_path}", file=sys.stderr)
+            if not os.path.isfile(args.image):
+                print(f"ERROR: Image not found: {args.image}", file=sys.stderr)
                 sys.exit(1)
+            image_paths.append(args.image)
+
+            if args.image2:
+                if not os.path.isfile(args.image2):
+                    print(f"ERROR: Image not found: {args.image2}", file=sys.stderr)
+                    sys.exit(1)
+                image_paths.append(args.image2)
         else:
-            print("Opening webcam... position the battery clearly in view.")
             cap_width = cap_height = None
             if args.resolution:
                 try:
@@ -324,25 +365,40 @@ def main():
                 except ValueError:
                     print(f"ERROR: --resolution must be WIDTHxHEIGHT (e.g. 1920x1080), got: {args.resolution}", file=sys.stderr)
                     sys.exit(1)
-            image_path = capture_webcam_photo(
+
+            print("Opening camera 1... position the battery clearly in view.")
+            image_paths.append(capture_webcam_photo(
                 camera_index=args.camera,
                 width=cap_width,
                 height=cap_height,
                 autofocus=(None if args.autofocus is None else args.autofocus == "on"),
                 focus=args.focus,
                 brightness=args.brightness,
-            )
+                label="cam1" if args.camera2 is not None else "",
+            ))
 
-        print("Sending image to OpenAI for identification...")
-        result = identify_battery(image_path, api_key=api_key)
+            if args.camera2 is not None:
+                print("Opening camera 2... position the battery clearly in view.")
+                image_paths.append(capture_webcam_photo(
+                    camera_index=args.camera2,
+                    width=cap_width,
+                    height=cap_height,
+                    autofocus=(None if args.autofocus is None else args.autofocus == "on"),
+                    focus=args.focus,
+                    brightness=args.brightness,
+                    label="cam2",
+                ))
+
+        print(f"Sending {len(image_paths)} image(s) to OpenAI for identification...")
+        result = identify_battery(image_paths, api_key=api_key)
 
         print("\n=== Battery Identification ===")
         print(f"Is battery: {result['is_battery']}")
         print(f"Battery type: {result['battery_type']}")
         print(f"Reasoning: {result['reasoning']}")
 
-        xml_path = args.xml_output or f"{os.path.splitext(image_path)[0]}.xml"
-        write_result_xml(image_path, result, xml_path)
+        xml_path = args.xml_output or f"{os.path.splitext(image_paths[0])[0]}.xml"
+        write_result_xml(image_paths, result, xml_path)
         print(f"\nResult written to: {xml_path}")
 
         if args.upload:
@@ -352,13 +408,13 @@ def main():
                 print(
                     "WARNING: --upload was set but SUPABASE_URL/SUPABASE_KEY were not "
                     "found (env vars or --supabase-url/--supabase-key). Skipping upload; "
-                    "the local photo and XML were still saved.",
+                    "the local photo(s) and XML were still saved.",
                     file=sys.stderr,
                 )
             else:
-                print("Uploading to hosted dashboard...")
+                print("Uploading primary photo to hosted dashboard...")
                 captured_at = datetime.now().isoformat(timespec="seconds")
-                upload_to_dashboard(image_path, result, captured_at, supabase_url, supabase_key)
+                upload_to_dashboard(image_paths[0], result, captured_at, supabase_url, supabase_key)
                 print("Uploaded to dashboard.")
 
     except Exception as e:
