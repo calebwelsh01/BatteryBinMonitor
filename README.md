@@ -17,13 +17,12 @@ The current system uses:
 1. **Raspberry Pi 5**
 2. **2× USB webcams**
 3. **Arduino Mega**
-4. **Arduino components:**
-
-   * LCD display
-   * LED
-   * Potentiometer
-   * Push button
-   * 220KΩ resistors
+4. **16×2 HD44780 LCD**
+5. **10KΩ potentiometer**
+6. **LED**
+7. **Push button**
+8. **~220Ω resistor for the LED**
+9. **220KΩ resistors** used by the Arduino circuitry
 
 ---
 
@@ -54,13 +53,122 @@ There are several features planned for future versions of the project:
 
 ---
 
-## How It Works
+# Wiring
+
+The Arduino Mega is responsible for controlling the LCD, LED, and push button.
+
+## LCD Wiring
+
+The LCD uses a standard **16×2 HD44780 display in 4-bit mode**.
+
+| LCD Pin       | Function        | Connects To                                |
+| ------------- | --------------- | ------------------------------------------ |
+| 1 (VSS)       | GND             | Mega GND                                   |
+| 2 (VDD)       | +5V             | Mega 5V                                    |
+| 3 (V0)        | Contrast        | Middle pin of 10KΩ potentiometer           |
+| 4 (RS)        | Register Select | Mega D8                                    |
+| 5 (RW)        | Read/Write      | Mega GND                                   |
+| 6 (E)         | Enable          | Mega D9                                    |
+| 7–10 (D0–D3)  | Data            | Not connected                              |
+| 11 (D4)       | Data            | Mega D10                                   |
+| 12 (D5)       | Data            | Mega D11                                   |
+| 13 (D6)       | Data            | Mega D12                                   |
+| 14 (D7)       | Data            | Mega D13                                   |
+| 15 (A / LED+) | Backlight +     | Mega 5V through ~220Ω resistor if required |
+| 16 (K / LED-) | Backlight -     | Mega GND                                   |
+
+### LCD Contrast Potentiometer
+
+The 10KΩ potentiometer is used to control the LCD contrast.
+
+Connect it as follows:
+
+| Potentiometer Connection | Connects To    |
+| ------------------------ | -------------- |
+| Outer pin                | Mega 5V        |
+| Middle pin               | LCD V0 (Pin 3) |
+| Outer pin                | Mega GND       |
+
+The two outer pins can be swapped; this will simply reverse the direction of the contrast adjustment.
+
+---
+
+## LED Wiring
+
+The LED is used as an indicator and is connected to a digital output on the Arduino Mega.
+
+```text
+Mega D4 ─── ~220Ω resistor ─── LED Anode (+)
+                                LED Cathode (-)
+                                      │
+                                      │
+                                   Mega GND
+```
+
+### Connections
+
+* **LED anode (+)** → ~220Ω resistor → **Mega D4**
+* **LED cathode (-)** → **Mega GND**
+
+The resistor is required to limit the current through the LED and prevent damage.
+
+---
+
+## Push Button Wiring
+
+The push button is connected to **digital pin D2** and GND.
+
+```text
+Mega D2 ───── Push Button ───── Mega GND
+```
+
+### Connections
+
+* One side of the button → **Mega D2**
+* Other side of the button → **Mega GND**
+
+The Arduino can use its internal pull-up resistor, meaning an external resistor is not required for the button.
+
+For example:
+
+```cpp
+pinMode(2, INPUT_PULLUP);
+```
+
+With this configuration:
+
+* Button **not pressed** → `HIGH`
+* Button **pressed** → `LOW`
+
+---
+
+## Arduino Pin Summary
+
+| Component       | Arduino Mega Pin |
+| --------------- | ---------------- |
+| LCD RS          | D8               |
+| LCD Enable      | D9               |
+| LCD D4          | D10              |
+| LCD D5          | D11              |
+| LCD D6          | D12              |
+| LCD D7          | D13              |
+| LED             | D4               |
+| Push Button     | D2               |
+| LCD VSS         | GND              |
+| LCD VDD         | 5V               |
+| LCD RW          | GND              |
+| LCD Backlight + | 5V               |
+| LCD Backlight - | GND              |
+
+---
+
+# How It Works
 
 The Raspberry Pi 5 runs a lightweight Ubuntu installation and handles the main Python programs.
 
 The system currently has **two primary Python scripts**.
 
-### `python_listener.py`
+## `python_listener.py`
 
 This script communicates with the Arduino Mega over USB serial.
 
@@ -77,7 +185,7 @@ Its main functions are:
 
 ---
 
-### `identify_battery.py`
+## `identify_battery.py`
 
 This script handles the actual battery identification process.
 
@@ -88,7 +196,7 @@ The general process is:
 3. Send both images to OpenAI's vision model
 4. Ask the model whether the object is a battery
 5. If it is a battery, determine what type of battery it is
-6. Upload the battery images and information to **Supabase**
+6. Upload the battery images and associated information to **Supabase**
 7. Supabase stores the data and images
 8. The GitHub-hosted `index.html` page retrieves the information and displays it
 
@@ -96,7 +204,7 @@ The general process is:
 
 ---
 
-## Supabase
+# Supabase
 
 Supabase is used to store the battery images and associated data.
 
@@ -116,9 +224,9 @@ The GitHub webpage then retrieves the stored information and displays the detect
 
 ---
 
-## Setup
+# Setup
 
-### 1. Install Ubuntu
+## 1. Install Ubuntu
 
 Install a lightweight version of Ubuntu on the Raspberry Pi 5.
 
@@ -131,7 +239,7 @@ sudo apt full-upgrade -y
 
 ---
 
-### 2. Create the Project Directory
+## 2. Create the Project Directory
 
 Create a directory for the project.
 
@@ -146,7 +254,7 @@ Place the project files inside this directory.
 
 ---
 
-### 3. Install Python
+## 3. Install Python
 
 Install Python and the required packages:
 
@@ -154,7 +262,7 @@ Install Python and the required packages:
 sudo apt install python3 python3-pip python3-venv -y
 ```
 
-It is recommended to create a virtual environment:
+Create a Python virtual environment:
 
 ```bash
 python3 -m venv .venv
@@ -168,7 +276,7 @@ source .venv/bin/activate
 
 ---
 
-### 4. Install Python Dependencies
+## 4. Install Python Dependencies
 
 Install the required Python packages:
 
@@ -186,15 +294,15 @@ pip install <package-name>
 
 ---
 
-## Supabase Setup
+# Supabase Setup
 
-### 5. Create a Supabase Project
+## 5. Create a Supabase Project
 
 Create a Supabase account and create a new project.
 
 ---
 
-### 6. Configure the Database
+## 6. Configure the Database
 
 Open the **SQL Editor** in Supabase.
 
@@ -208,7 +316,7 @@ This will create the required database structure.
 
 ---
 
-### 7. Create the Storage Bucket
+## 7. Create the Storage Bucket
 
 Go to **Storage** in Supabase and create a new bucket.
 
@@ -220,7 +328,7 @@ battery-photos
 
 ---
 
-### 8. Get Your Supabase Credentials
+## 8. Get Your Supabase Credentials
 
 Go to your Supabase project settings and find:
 
@@ -231,9 +339,9 @@ Keep these values somewhere safe. They will be required when configuring the Ras
 
 ---
 
-## OpenAI Setup
+# OpenAI Setup
 
-### 9. Create an OpenAI API Key
+## 9. Create an OpenAI API Key
 
 Create an OpenAI API key and keep it somewhere secure.
 
@@ -243,15 +351,15 @@ Do **not** commit your API key to GitHub.
 
 ---
 
-## GitHub Pages Setup
+# GitHub Pages Setup
 
-### 10. Create a GitHub Repository
+## 10. Create a GitHub Repository
 
 Create a GitHub repository that will host the project's web interface.
 
 ---
 
-### 11. Add `index.html`
+## 11. Add `index.html`
 
 Add the provided:
 
@@ -267,7 +375,7 @@ The webpage will retrieve battery information from Supabase and display it.
 
 ---
 
-## Configure Environment Variables
+# Configure Environment Variables
 
 Rather than putting API keys directly into the Python scripts, the project uses environment variables.
 
@@ -303,7 +411,7 @@ echo $SUPABASE_KEY
 
 ---
 
-## Arduino Serial Port
+# Arduino Serial Port
 
 `python_listener.py` communicates with the Arduino through a serial connection.
 
@@ -349,7 +457,7 @@ SERIAL_PORT = "/dev/ttyACM0"
 
 ---
 
-## Camera Configuration
+# Camera Configuration
 
 The two webcams are identified by their camera indexes.
 
@@ -379,7 +487,7 @@ Use the available `/dev/video*` devices to help determine which cameras are conn
 
 ---
 
-## Running the System
+# Running the System
 
 Once everything is configured, the general workflow is:
 
@@ -432,7 +540,7 @@ Once everything is configured, the general workflow is:
 
 ---
 
-## Project Structure
+# Project Structure
 
 The project will generally look something like:
 
@@ -448,7 +556,7 @@ BatteryBin/
 
 ---
 
-## Future Development
+# Future Development
 
 This project is still under development.
 
@@ -470,6 +578,4 @@ Potential additions include:
 
 ---
 
-## License
 
-This project is currently a personal project. A license will be added in the future.
