@@ -51,6 +51,10 @@ There are several features planned for future versions of the project:
 
   * Potentially add a third camera for improved identification
 
+* **YOLO26 compatibility for future use with custom training data**
+
+  * Potentially add customer data to better identify swollen or broken batteries going in and training with custom datasets
+
 ---
 
 # Wiring
