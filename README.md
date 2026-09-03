@@ -1,48 +1,475 @@
-Welcome to my first repo
+# Battery Detection System
 
-This is designed to be a battery detection system. It uses two cameras, a Raspberry Pi 5, and GPT-4.0 to take pictures of batteries and identify them based on labels and their general shapes. 
+Welcome to my first GitHub repository!
 
-This project uses:
-  1. Raspberry Pi 5
-  2. x2 webcams
-  3. Arduino Mega
-  4. Arduino components: LCD, LED, potentiometer, button, and 220 K resistors
+This project is a **battery detection and sorting system** designed to identify batteries using computer vision and AI.
 
-In future, there will be:
-  1. Scales to measure and track the weight of batteries
-  2. Solenoid to activate the bin trap door for the battery bin
-  3. Motion-detected light for cameras and user
-  4. (maybe) a second or larger LCD to display more data
-  5. Potentially another camera
+The system uses **two cameras, a Raspberry Pi 5, an Arduino Mega, and OpenAI's GPT-4.0 vision capabilities** to photograph batteries and determine whether an object is a battery and, if so, what type of battery it is.
 
-How it works
-        -Raspberry Pi 5 runs a lite version of Ubuntu to run scripts off of
-        -The Pi 5 runs 2 main scripts:
-                1. python_listener.py:
-                        -This listens for input from the Arduino and posts a response when the button is pressed. It also helps the Arduino decide what to                                 display on the screen and what type of battery is found. (A more extensive explanation will be shown later)
-                2. identify_battery.py:
-                        -This Python script takes photos from two cameras and send those images to GPT-4.0 with a prompt to dictate whether the object is a                                 battery? If so, what type? Then it sends the battery image to Supabase, and Supabase publishes the image to a GitHub page.
-                         (A more extensive explanation will be shown later)
-        - Once the images are sent off to Supabase, is then used in the index.html and print all the data sent.
+The project is designed to eventually become a more automated battery collection and sorting system.
 
-How to set it up:
-        1. Install Ubuntu-lite on the Raspberry Pi 5
-        2. ```sudo apt update && sudo apt full-upgrade -y```
-        3. Create a folder to host the images and scripts. I used /home/<user>/Destop/BatteryBin
-        4. Create a Python environment to use ```sudo apt install python3 <env-name>```
-        5. ```pip install opencv-python openai supabase pyserial``` (may need more, but you can see what you need once you run the scripts)
-        6. Create a Supabase account if not already
-        7. Open SQL editor in Supabase and add the ```shcema.sql```
-        8. Go to bucket in Supabase and name new bucket exactly ```battery-photos``` 
-        9. Then go to project settings and copy project URL & anon-public API key (save for later)
-        10. Create an OpenAI API key and store the API key for later (Note: you will need to add funds to the API for it to work)
-        11. Create a github repo for your index.html to be hosted on
-        12. Download the ```index.html``` and add it to your repos pages
-        13. Then on the Pi 5 run:
-        14. ```nano ~/.bashrc``` and add your API keys to the bottom of the file
-        15. ```export OPENAI_API_KEY="sk-your-actual-key-here"```
-        16. ```export SUPABASE_URL="https://xxxxx.supabase.co"```
-        17. ```export SUPABASE_KEY="your-anon-public-key"```
-        
-        
-                
+---
+
+## Current Hardware
+
+The current system uses:
+
+1. **Raspberry Pi 5**
+2. **2× USB webcams**
+3. **Arduino Mega**
+4. **Arduino components:**
+
+   * LCD display
+   * LED
+   * Potentiometer
+   * Push button
+   * 220KΩ resistors
+
+---
+
+## Planned Features
+
+There are several features planned for future versions of the project:
+
+* **Digital scales**
+
+  * Measure and record the weight of each battery
+  * Track battery weights over time
+
+* **Solenoid-controlled bin**
+
+  * Automatically open a trap door to sort or dispose of batteries
+
+* **Motion-activated lighting**
+
+  * Automatically illuminate the cameras and user area when motion is detected
+
+* **Larger LCD display**
+
+  * Display additional information about detected batteries
+
+* **Additional camera**
+
+  * Potentially add a third camera for improved identification
+
+---
+
+## How It Works
+
+The Raspberry Pi 5 runs a lightweight Ubuntu installation and handles the main Python programs.
+
+The system currently has **two primary Python scripts**.
+
+### `python_listener.py`
+
+This script communicates with the Arduino Mega over USB serial.
+
+Its main functions are:
+
+* Listen for input from the Arduino
+* Detect when the user presses the button
+* Trigger the battery identification process
+* Send information back to the Arduino
+* Tell the Arduino what information should be displayed on the LCD
+* Help determine what type of battery has been detected
+
+> A more detailed explanation of this script will be added in the future.
+
+---
+
+### `identify_battery.py`
+
+This script handles the actual battery identification process.
+
+The general process is:
+
+1. Capture an image using **Camera 1**
+2. Capture an image using **Camera 2**
+3. Send both images to OpenAI's vision model
+4. Ask the model whether the object is a battery
+5. If it is a battery, determine what type of battery it is
+6. Upload the battery images and information to **Supabase**
+7. Supabase stores the data and images
+8. The GitHub-hosted `index.html` page retrieves the information and displays it
+
+> A more detailed explanation of this script will be added in the future.
+
+---
+
+## Supabase
+
+Supabase is used to store the battery images and associated data.
+
+The project uses a Supabase storage bucket named:
+
+```text
+battery-photos
+```
+
+The database schema is provided in:
+
+```text
+schema.sql
+```
+
+The GitHub webpage then retrieves the stored information and displays the detected batteries.
+
+---
+
+## Setup
+
+### 1. Install Ubuntu
+
+Install a lightweight version of Ubuntu on the Raspberry Pi 5.
+
+Once Ubuntu is installed, update the system:
+
+```bash
+sudo apt update
+sudo apt full-upgrade -y
+```
+
+---
+
+### 2. Create the Project Directory
+
+Create a directory for the project.
+
+For example:
+
+```bash
+mkdir -p ~/Desktop/BatteryBin
+cd ~/Desktop/BatteryBin
+```
+
+Place the project files inside this directory.
+
+---
+
+### 3. Install Python
+
+Install Python and the required packages:
+
+```bash
+sudo apt install python3 python3-pip python3-venv -y
+```
+
+It is recommended to create a virtual environment:
+
+```bash
+python3 -m venv .venv
+```
+
+Activate it:
+
+```bash
+source .venv/bin/activate
+```
+
+---
+
+### 4. Install Python Dependencies
+
+Install the required Python packages:
+
+```bash
+pip install opencv-python openai supabase pyserial
+```
+
+Additional packages may be required depending on the version of the scripts.
+
+If a script reports a missing Python module, install the required package using:
+
+```bash
+pip install <package-name>
+```
+
+---
+
+## Supabase Setup
+
+### 5. Create a Supabase Project
+
+Create a Supabase account and create a new project.
+
+---
+
+### 6. Configure the Database
+
+Open the **SQL Editor** in Supabase.
+
+Run the SQL contained in:
+
+```text
+schema.sql
+```
+
+This will create the required database structure.
+
+---
+
+### 7. Create the Storage Bucket
+
+Go to **Storage** in Supabase and create a new bucket.
+
+The bucket must be named exactly:
+
+```text
+battery-photos
+```
+
+---
+
+### 8. Get Your Supabase Credentials
+
+Go to your Supabase project settings and find:
+
+* Project URL
+* Anon/Public API key
+
+Keep these values somewhere safe. They will be required when configuring the Raspberry Pi.
+
+---
+
+## OpenAI Setup
+
+### 9. Create an OpenAI API Key
+
+Create an OpenAI API key and keep it somewhere secure.
+
+> **Important:** API usage requires billing/credits to be configured on your OpenAI account.
+
+Do **not** commit your API key to GitHub.
+
+---
+
+## GitHub Pages Setup
+
+### 10. Create a GitHub Repository
+
+Create a GitHub repository that will host the project's web interface.
+
+---
+
+### 11. Add `index.html`
+
+Add the provided:
+
+```text
+index.html
+```
+
+file to the GitHub repository.
+
+Enable **GitHub Pages** for the repository so that the webpage can be accessed through the internet.
+
+The webpage will retrieve battery information from Supabase and display it.
+
+---
+
+## Configure Environment Variables
+
+Rather than putting API keys directly into the Python scripts, the project uses environment variables.
+
+On the Raspberry Pi, open your Bash configuration:
+
+```bash
+nano ~/.bashrc
+```
+
+Add the following to the bottom of the file:
+
+```bash
+export OPENAI_API_KEY="sk-your-actual-key-here"
+export SUPABASE_URL="https://xxxxx.supabase.co"
+export SUPABASE_KEY="your-anon-public-key"
+```
+
+Save the file and reload your Bash configuration:
+
+```bash
+source ~/.bashrc
+```
+
+You can check that the variables exist with:
+
+```bash
+echo $OPENAI_API_KEY
+echo $SUPABASE_URL
+echo $SUPABASE_KEY
+```
+
+**Be careful when displaying your API key in a terminal or sharing screenshots.**
+
+---
+
+## Arduino Serial Port
+
+`python_listener.py` communicates with the Arduino through a serial connection.
+
+You will need to determine which serial port your Arduino is connected to.
+
+You can check connected USB devices with:
+
+```bash
+lsusb
+```
+
+You can also check available serial devices with:
+
+```bash
+ls /dev/ttyUSB*
+```
+
+or:
+
+```bash
+ls /dev/ttyACM*
+```
+
+For example, my Arduino was connected as:
+
+```text
+/dev/ttyUSB0
+```
+
+The serial port is configured in `python_listener.py`:
+
+```python
+SERIAL_PORT = "/dev/ttyUSB0"
+```
+
+Change this value if your Arduino is using a different port.
+
+For example:
+
+```python
+SERIAL_PORT = "/dev/ttyACM0"
+```
+
+---
+
+## Camera Configuration
+
+The two webcams are identified by their camera indexes.
+
+You may need to determine which indexes Linux has assigned to your webcams.
+
+The `identify_battery.py` script is launched using arguments similar to:
+
+```bash
+python3 identify_battery.py --camera 0 --camera2 2 --upload
+```
+
+In this example:
+
+* `--camera 0` → Camera 1
+* `--camera2 2` → Camera 2
+* `--upload` → Upload the captured images to Supabase
+
+Your camera indexes may be different.
+
+For example, your cameras could be:
+
+```bash
+python3 identify_battery.py --camera 1 --camera2 3 --upload
+```
+
+Use the available `/dev/video*` devices to help determine which cameras are connected.
+
+---
+
+## Running the System
+
+Once everything is configured, the general workflow is:
+
+```text
+           ┌──────────────┐
+           │ Arduino Mega │
+           └──────┬───────┘
+                  │
+             Button Press
+                  │
+                  ▼
+        ┌───────────────────┐
+        │ python_listener.py│
+        └─────────┬─────────┘
+                  │
+                  ▼
+        ┌───────────────────┐
+        │ identify_battery  │
+        │       .py         │
+        └─────────┬─────────┘
+                  │
+          ┌───────┴───────┐
+          ▼               ▼
+     ┌─────────┐     ┌─────────┐
+     │ Camera 1│     │ Camera 2│
+     └────┬────┘     └────┬────┘
+          │               │
+          └───────┬───────┘
+                  │
+                  ▼
+          ┌──────────────┐
+          │    OpenAI    │
+          │    Vision    │
+          └──────┬───────┘
+                 │
+                 ▼
+          Battery detected
+                 │
+                 ▼
+          ┌──────────────┐
+          │   Supabase   │
+          └──────┬───────┘
+                 │
+                 ▼
+          ┌──────────────┐
+          │  GitHub Page │
+          │  index.html  │
+          └──────────────┘
+```
+
+---
+
+## Project Structure
+
+The project will generally look something like:
+
+```text
+BatteryBin/
+├── python_listener.py
+├── identify_battery.py
+├── schema.sql
+├── index.html
+├── README.md
+└── .venv/
+```
+
+---
+
+## Future Development
+
+This project is still under development.
+
+Future versions will focus on making the system more automated and improving the amount of information recorded for each battery.
+
+Potential additions include:
+
+* Battery weight measurement
+* Automatic battery sorting
+* Solenoid-controlled trap door
+* Motion detection
+* Automatic lighting
+* Additional cameras
+* Larger LCD display
+* More detailed battery information
+* Battery history and statistics
+* Improved AI identification
+* Automatic battery type categorisation
+
+---
+
+## License
+
+This project is currently a personal project. A license will be added in the future.
