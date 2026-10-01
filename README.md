@@ -23,6 +23,12 @@ The current system uses:
 7. **Push button**
 8. **~220Ω resistor for the LED**
 9. **220KΩ resistors** used by the Arduino circuitry
+10. **12V solenoid** for the automatic sorting trap door
+11. **Logic-level N-channel MOSFET** for switching the solenoid
+12. **1KΩ resistor** for the MOSFET gate
+13. **10KΩ resistor** for the MOSFET gate pull-down
+14. **SS54 Schottky diode** for solenoid flyback protection
+15. **External 12V power supply** for the solenoid
 
 ---
 
@@ -146,6 +152,69 @@ With this configuration:
 
 ---
 
+---
+
+## Solenoid Wiring
+
+The 12V solenoid is used to control the automatic sorting/trap door. The Arduino Mega **does not power the solenoid directly**. Instead, digital pin **D7** controls a logic-level N-channel MOSFET, which switches the separate 12V supply to the solenoid.
+
+### Solenoid Driver Circuit
+
+```text
+                    +12V External Supply
+                           │
+                           ├───────────────┐
+                           │               │
+                           │             Solenoid
+                           │               │
+                           │               ├─────────┐
+                           │               │         │
+                           │             D1 SS54     │
+                           │          Schottky diode │
+                           │               │         │
+                           │               └─────────┤
+                           │                         │
+                           │                       Drain
+                           │                    ┌─────────┐
+                           │                    │ N-MOSFET│
+                           │                    └─────────┘
+                           │                       Source
+                           │                         │
+                           └─────────────────────────┘
+                                                     │
+                                                    GND
+
+Arduino Mega D7 ─── 1KΩ ─── Gate
+                         │
+                       10KΩ
+                         │
+                        GND
+```
+
+### Connections
+
+* **Arduino Mega D7** → **1KΩ resistor** → MOSFET **Gate**
+* MOSFET **Gate** → **10KΩ resistor** → **GND**
+* External **+12V** → Solenoid positive terminal
+* Solenoid negative terminal → MOSFET **Drain**
+* MOSFET **Source** → **GND**
+* External 12V supply **GND** → **Arduino Mega GND**
+* **SS54 Schottky diode** is connected across the solenoid terminals for flyback protection
+* The diode is oriented so it is **reverse-biased during normal operation**:
+  * Diode **cathode/striped side** → **+12V / solenoid positive**
+  * Diode **anode** → **MOSFET drain / solenoid negative**
+
+### Important
+
+The solenoid should be powered from the **separate 12V supply**, not from the Arduino 5V pin. The Arduino only provides the control signal to the MOSFET.
+
+The **10KΩ resistor** keeps the MOSFET turned off when D7 is floating or during Arduino startup. The **1KΩ resistor** limits the gate drive current and helps protect the Arduino output.
+
+The schematic specifies replacing the originally shown **1N4007** flyback diode with an **SS54 Schottky diode**.
+
+> **Note:** The MOSFET should be a suitable **logic-level N-channel MOSFET** capable of handling the solenoid's current at 12V. The MOSFET must also be rated for the voltage and current required by the solenoid.
+
+
 ## Arduino Pin Summary
 
 | Component       | Arduino Mega Pin |
@@ -158,6 +227,7 @@ With this configuration:
 | LCD D7          | D13              |
 | LED             | D4               |
 | Push Button     | D2               |
+| Solenoid MOSFET Gate | D7          |
 | LCD VSS         | GND              |
 | LCD VDD         | 5V               |
 | LCD RW          | GND              |
@@ -571,7 +641,7 @@ Potential additions include:
 
 * Battery weight measurement
 * Automatic battery sorting
-* Solenoid-controlled trap door
+* Solenoid-controlled trap door using a 12V solenoid and MOSFET driver
 * Motion detection
 * Automatic lighting
 * Additional cameras
