@@ -276,6 +276,7 @@ Activate it:
 
 ```bash
 source .venv/bin/activate
+source python_env~/bin/activate
 ```
 
 ---
