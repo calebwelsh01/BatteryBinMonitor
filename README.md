@@ -1,656 +1,295 @@
-# Battery Detection System
+# BatteryBin — AI Battery Detection System
 
-Welcome to my first GitHub repository!
+BatteryBin is a battery detection system that uses computer vision and AI to photograph an item, determine whether it is a battery, and identify its type. It runs on a **Raspberry Pi 5**, uses one or two USB webcams, sends images to an OpenAI vision model, and stores the resulting photos and identification data in Supabase for display by the project's web interface.
 
-This project is a **battery detection and sorting system** designed to identify batteries using computer vision and AI.
+The controller has been consolidated into a single Python program, `batterybin.py`. The Arduino Mega, serial connection, and 16×2 LCD used in earlier versions are no longer part of the current system.
 
-The system uses **two cameras, a Raspberry Pi 5, an Arduino Mega, and OpenAI's GPT-4.0 vision capabilities** to photograph batteries and determine whether an object is a battery and, if so, what type of battery it is.
+## How it works
 
-The project is designed to eventually become a more automated battery collection and sorting system.
+1. The user presses the button connected to the Raspberry Pi.
+2. BatteryBin captures images from one or two USB webcams.
+3. The images are sent to an OpenAI vision model to determine whether the item is a battery and, if so, identify its type.
+4. The program saves the identification result as an XML file beside the primary photo.
+5. The primary photo and its result are uploaded to Supabase.
+6. If a battery is detected, the Raspberry Pi pulses the solenoid to operate the trap door.
+7. If an upload fails, the photo/XML pair is kept for a later retry. While the system is idle, pending uploads are retried at the configured interval.
 
----
+Identification results and status messages are printed to the terminal and can be viewed in the systemd journal when running as a service.
 
-## Current Hardware
+## Current hardware
 
-The current system uses:
+- Raspberry Pi 5
+- One or two USB webcams
+- Push button to start a detection cycle
+- 12 V solenoid for the trap door
+- Logic-level N-channel MOSFET or suitable relay module to switch the solenoid
+- 1 kΩ gate resistor and 10 kΩ gate pull-down resistor when using the MOSFET circuit
+- SS54 Schottky diode for solenoid flyback protection
+- Separate 12 V supply for the solenoid
 
-1. **Raspberry Pi 5**
-2. **2× USB webcams**
-3. **Arduino Mega**
-4. **16×2 HD44780 LCD**
-5. **10KΩ potentiometer**
-6. **LED**
-7. **Push button**
-8. **~220Ω resistor for the LED**
-9. **220KΩ resistors** used by the Arduino circuitry
-10. **12V solenoid** for the automatic sorting trap door
-11. **Logic-level N-channel MOSFET** for switching the solenoid
-12. **1KΩ resistor** for the MOSFET gate
-13. **10KΩ resistor** for the MOSFET gate pull-down
-14. **SS54 Schottky diode** for solenoid flyback protection
-15. **External 12V power supply** for the solenoid
+### Removed from the current version
 
----
+The following components were used in earlier versions but are no longer required by the current controller:
 
-## Planned Features
+- Arduino Mega
+- Arduino-to-Raspberry Pi USB serial connection
+- 16×2 HD44780 LCD and contrast potentiometer
+- Arduino indicator LED and associated wiring
 
-There are several features planned for future versions of the project:
+## Raspberry Pi 5 wiring
 
-* **Digital scales**
+GPIO numbers below use **BCM numbering**, as used by `batterybin.py`. Physical pin numbers refer to the Raspberry Pi's 40-pin header.
 
-  * Measure and record the weight of each battery
-  * Track battery weights over time
+| Device | BCM GPIO | Physical pin | Connection / notes |
+|---|---:|---:|---|
+| Push button | GPIO17 | 11 | Connect the other button terminal to GND (physical pin 9). The program uses an internal pull-up, so no external button resistor is needed. |
+| Solenoid driver control | GPIO27 | 13 | Connect to the logic-level MOSFET gate or relay input. Connect the driver ground to Raspberry Pi GND (for example, physical pin 14). |
 
-* **Solenoid-controlled bin**
+The pin assignments can be changed using `BUTTON_PIN` and `SOLENOID_PIN` near the top of `batterybin.py`. For an active-low relay board, set `SOLENOID_ACTIVE_HIGH = False`.
 
-  * Automatically open a trap door to sort or dispose of batteries
+### Solenoid safety
 
-* **Motion-activated lighting**
+- **Never power the solenoid directly from a Raspberry Pi GPIO pin.** GPIO pins are 3.3 V only and are not 5 V tolerant.
+- Use a suitably rated logic-level N-channel MOSFET or relay driver and a separate supply appropriate for the solenoid.
+- When using a MOSFET, connect the solenoid between the external supply's positive terminal and the MOSFET drain, and connect the MOSFET source to ground.
+- Fit a flyback diode across the solenoid coil. For the SS54 diode, connect the **striped cathode to +12 V / solenoid positive** and the anode to the MOSFET drain / solenoid negative.
+- Connect the external supply ground and Raspberry Pi ground together so the control signal has a common reference.
+- Confirm the MOSFET, relay, wiring, power supply, and diode are rated for the solenoid's voltage and current.
 
-  * Automatically illuminate the cameras and user area when motion is detected
+## Software and project structure
 
-* **Larger LCD display**
+The current controller is `batterybin.py`. It combines the responsibilities previously handled by `python_listener.py`, `identify_battery.py`, and `upload_battery_data.py`:
 
-  * Display additional information about detected batteries
+- Button monitoring and detection-cycle control
+- Webcam capture
+- OpenAI vision identification
+- XML result creation
+- Supabase upload
+- Retrying photo/XML pairs that have not uploaded successfully
 
-* **Additional camera**
-
-  * Potentially add a third camera for improved identification
-
-* **YOLO26 compatibility for future use with custom training data**
-
-  * Potentially add customer data to better identify swollen or broken batteries going in and training with custom datasets
-
----
-
-# Wiring
-
-The Arduino Mega is responsible for controlling the LCD, LED, and push button.
-
-## LCD Wiring
-
-The LCD uses a standard **16×2 HD44780 display in 4-bit mode**.
-
-| LCD Pin       | Function        | Connects To                                |
-| ------------- | --------------- | ------------------------------------------ |
-| 1 (VSS)       | GND             | Mega GND                                   |
-| 2 (VDD)       | +5V             | Mega 5V                                    |
-| 3 (V0)        | Contrast        | Middle pin of 10KΩ potentiometer           |
-| 4 (RS)        | Register Select | Mega D8                                    |
-| 5 (RW)        | Read/Write      | Mega GND                                   |
-| 6 (E)         | Enable          | Mega D9                                    |
-| 7–10 (D0–D3)  | Data            | Not connected                              |
-| 11 (D4)       | Data            | Mega D10                                   |
-| 12 (D5)       | Data            | Mega D11                                   |
-| 13 (D6)       | Data            | Mega D12                                   |
-| 14 (D7)       | Data            | Mega D13                                   |
-| 15 (A / LED+) | Backlight +     | Mega 5V through ~220Ω resistor if required |
-| 16 (K / LED-) | Backlight -     | Mega GND                                   |
-
-### LCD Contrast Potentiometer
-
-The 10KΩ potentiometer is used to control the LCD contrast.
-
-Connect it as follows:
-
-| Potentiometer Connection | Connects To    |
-| ------------------------ | -------------- |
-| Outer pin                | Mega 5V        |
-| Middle pin               | LCD V0 (Pin 3) |
-| Outer pin                | Mega GND       |
-
-The two outer pins can be swapped; this will simply reverse the direction of the contrast adjustment.
-
----
-
-## LED Wiring
-
-The LED is used as an indicator and is connected to a digital output on the Arduino Mega.
+A typical project directory may look like this:
 
 ```text
-Mega D4 ─── ~220Ω resistor ─── LED Anode (+)
-                                LED Cathode (-)
-                                      │
-                                      │
-                                   Mega GND
+BatteryBin/
+├── batterybin.py
+├── schema.sql
+├── index.html                 # web interface, if maintained in this repository
+├── README.md
+├── .env                       # local secrets; do not commit
+├── .uploaded_state.json       # upload state; do not commit
+└── python_env/                # Python virtual environment
 ```
 
-### Connections
+The precise files in the repository may vary. The script saves photos and XML results to `--bin-dir`, which defaults to the script's own directory.
 
-* **LED anode (+)** → ~220Ω resistor → **Mega D4**
-* **LED cathode (-)** → **Mega GND**
+## Setup
 
-The resistor is required to limit the current through the LED and prevent damage.
+These instructions assume Ubuntu or another compatible Linux installation on the Raspberry Pi 5.
 
----
-
-## Push Button Wiring
-
-The push button is connected to **digital pin D2** and GND.
-
-```text
-Mega D2 ───── Push Button ───── Mega GND
-```
-
-### Connections
-
-* One side of the button → **Mega D2**
-* Other side of the button → **Mega GND**
-
-The Arduino can use its internal pull-up resistor, meaning an external resistor is not required for the button.
-
-For example:
-
-```cpp
-pinMode(2, INPUT_PULLUP);
-```
-
-With this configuration:
-
-* Button **not pressed** → `HIGH`
-* Button **pressed** → `LOW`
-
----
-
----
-
-## Solenoid Wiring
-
-The 12V solenoid is used to control the automatic sorting/trap door. The Arduino Mega **does not power the solenoid directly**. Instead, digital pin **D7** controls a logic-level N-channel MOSFET, which switches the separate 12V supply to the solenoid.
-
-### Solenoid Driver Circuit
-
-```text
-                    +12V External Supply
-                           │
-                           ├───────────────┐
-                           │               │
-                           │             Solenoid
-                           │               │
-                           │               ├─────────┐
-                           │               │         │
-                           │             D1 SS54     │
-                           │          Schottky diode │
-                           │               │         │
-                           │               └─────────┤
-                           │                         │
-                           │                       Drain
-                           │                    ┌─────────┐
-                           │                    │ N-MOSFET│
-                           │                    └─────────┘
-                           │                       Source
-                           │                         │
-                           └─────────────────────────┘
-                                                     │
-                                                    GND
-
-Arduino Mega D7 ─── 1KΩ ─── Gate
-                         │
-                       10KΩ
-                         │
-                        GND
-```
-
-### Connections
-
-* **Arduino Mega D7** → **1KΩ resistor** → MOSFET **Gate**
-* MOSFET **Gate** → **10KΩ resistor** → **GND**
-* External **+12V** → Solenoid positive terminal
-* Solenoid negative terminal → MOSFET **Drain**
-* MOSFET **Source** → **GND**
-* External 12V supply **GND** → **Arduino Mega GND**
-* **SS54 Schottky diode** is connected across the solenoid terminals for flyback protection
-* The diode is oriented so it is **reverse-biased during normal operation**:
-  * Diode **cathode/striped side** → **+12V / solenoid positive**
-  * Diode **anode** → **MOSFET drain / solenoid negative**
-
-### Important
-
-The solenoid should be powered from the **separate 12V supply**, not from the Arduino 5V pin. The Arduino only provides the control signal to the MOSFET.
-
-The **10KΩ resistor** keeps the MOSFET turned off when D7 is floating or during Arduino startup. The **1KΩ resistor** limits the gate drive current and helps protect the Arduino output.
-
-The schematic specifies replacing the originally shown **1N4007** flyback diode with an **SS54 Schottky diode**.
-
-> **Note:** The MOSFET should be a suitable **logic-level N-channel MOSFET** capable of handling the solenoid's current at 12V. The MOSFET must also be rated for the voltage and current required by the solenoid.
-
-
-## Arduino Pin Summary
-
-| Component       | Arduino Mega Pin |
-| --------------- | ---------------- |
-| LCD RS          | D8               |
-| LCD Enable      | D9               |
-| LCD D4          | D10              |
-| LCD D5          | D11              |
-| LCD D6          | D12              |
-| LCD D7          | D13              |
-| LED             | D4               |
-| Push Button     | D2               |
-| Solenoid MOSFET Gate | D7          |
-| LCD VSS         | GND              |
-| LCD VDD         | 5V               |
-| LCD RW          | GND              |
-| LCD Backlight + | 5V               |
-| LCD Backlight - | GND              |
-
----
-
-# How It Works
-
-The Raspberry Pi 5 runs a lightweight Ubuntu installation and handles the main Python programs.
-
-The system currently has **two primary Python scripts**.
-
-## `python_listener.py`
-
-This script communicates with the Arduino Mega over USB serial.
-
-Its main functions are:
-
-* Listen for input from the Arduino
-* Detect when the user presses the button
-* Trigger the battery identification process
-* Send information back to the Arduino
-* Tell the Arduino what information should be displayed on the LCD
-* Help determine what type of battery has been detected
-
-> A more detailed explanation of this script will be added in the future.
-
----
-
-## `identify_battery.py`
-
-This script handles the actual battery identification process.
-
-The general process is:
-
-1. Capture an image using **Camera 1**
-2. Capture an image using **Camera 2**
-3. Send both images to OpenAI's vision model
-4. Ask the model whether the object is a battery
-5. If it is a battery, determine what type of battery it is
-6. Upload the battery images and associated information to **Supabase**
-7. Supabase stores the data and images
-8. The GitHub-hosted `index.html` page retrieves the information and displays it
-
-> A more detailed explanation of this script will be added in the future.
-
----
-
-# Supabase
-
-Supabase is used to store the battery images and associated data.
-
-The project uses a Supabase storage bucket named:
-
-```text
-battery-photos
-```
-
-The database schema is provided in:
-
-```text
-schema.sql
-```
-
-The GitHub webpage then retrieves the stored information and displays the detected batteries.
-
----
-
-# Setup
-
-## 1. Install Ubuntu
-
-Install a lightweight version of Ubuntu on the Raspberry Pi 5.
-
-Once Ubuntu is installed, update the system:
+### 1. Update the Raspberry Pi and install system packages
 
 ```bash
 sudo apt update
 sudo apt full-upgrade -y
+sudo apt install python3 python3-pip python3-venv swig liblgpio-dev python3-dev -y
 ```
 
----
+The `swig`, `liblgpio-dev`, and `python3-dev` packages are needed if `lgpio` must be built in the virtual environment.
 
-## 2. Create the Project Directory
+### 2. Create and activate the Python environment
 
-Create a directory for the project.
-
-For example:
+From the project directory:
 
 ```bash
-mkdir -p ~/Desktop/BatteryBin
-cd ~/Desktop/BatteryBin
+python3 -m venv python_env
+source python_env/bin/activate
+pip install --upgrade pip
+pip install opencv-python openai supabase gpiozero lgpio
 ```
 
-Place the project files inside this directory.
-
----
-
-## 3. Install Python
-
-Install Python and the required packages:
+Check that `lgpio` imports correctly:
 
 ```bash
-sudo apt install python3 python3-pip python3-venv -y
+python -c "import lgpio; print('lgpio OK')"
 ```
 
-Create a Python virtual environment:
+The Raspberry Pi 5 uses `lgpio` as the GPIO backend for `gpiozero`; `RPi.GPIO` is not supported as the Pi 5 backend. If `lgpio` fails to build, install the system package instead:
 
 ```bash
-python3 -m venv .venv
+sudo apt install python3-lgpio
 ```
 
-Activate it:
+If using the system package from the virtual environment, set `include-system-site-packages = true` in `python_env/pyvenv.cfg`.
+
+### 3. Allow the service user to access GPIO
+
+For a service running as the `staff` user:
 
 ```bash
-source .venv/bin/activate
-source python_env~/bin/activate
+sudo usermod -aG gpio staff
 ```
 
----
+Log out and back in (or reboot) for the group change to take effect.
 
-## 4. Install Python Dependencies
+### 4. Configure OpenAI and Supabase
 
-Install the required Python packages:
+Create an OpenAI API key and a Supabase project. OpenAI API usage may require billing or credits to be enabled.
+
+The program reads these environment variables:
+
+| Variable | Purpose |
+|---|---|
+| `OPENAI_API_KEY` | OpenAI API key used for vision identification |
+| `SUPABASE_URL` | Supabase project URL |
+| `SUPABASE_KEY` | Supabase API key used by the uploader; use the key required by your configured upload policies and keep it secret |
+
+The project uses a Supabase Storage bucket named `battery-photos`. If the database schema is needed, run the SQL in `schema.sql` using the Supabase SQL Editor. The web interface can retrieve stored battery information and display it.
+
+Create a local `.env` file in the project directory. For example:
+
+```dotenv
+OPENAI_API_KEY=your-openai-api-key
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_KEY=your-supabase-key
+```
+
+Do not commit `.env` or paste its contents into public logs, screenshots, or issues. Add at least the following to `.gitignore`:
+
+```gitignore
+.env
+.uploaded_state.json
+python_env/
+```
+
+**Security note:** An earlier version of `upload_battery_data.py` contained a hard-coded Supabase `service_role` key. If that key was ever committed or shared, regenerate it in Supabase. A `service_role` key bypasses row-level security and must never be committed to the repository. Use environment variables or command-line flags for credentials, and use the least-privileged key compatible with the application's upload policies.
+
+### 5. Configure the systemd service environment
+
+`systemd` does not automatically read `~/.bashrc`. Configure the service to load the `.env` file directly. Adjust paths and the service name to match your installation.
+
+Example service settings:
+
+```ini
+[Service]
+User=staff
+WorkingDirectory=/home/staff/Desktop/BatteryBin
+EnvironmentFile=/home/staff/Desktop/BatteryBin/.env
+ExecStart=/home/staff/Desktop/BatteryBin/python_env/bin/python /home/staff/Desktop/BatteryBin/batterybin.py
+```
+
+If you already have a service installed, keep its existing unit configuration and update the relevant paths and environment settings. After changing the unit, reload systemd and restart the service:
 
 ```bash
-pip install opencv-python openai supabase pyserial
+sudo systemctl daemon-reload
+sudo systemctl restart battery-listener
 ```
 
-Additional packages may be required depending on the version of the scripts.
+The service name above follows the existing project notes; use the actual unit name on your Raspberry Pi.
 
-If a script reports a missing Python module, install the required package using:
+## Running BatteryBin
+
+Activate the environment and run the script from the project directory.
 
 ```bash
-pip install <package-name>
+source python_env/bin/activate
+python batterybin.py
 ```
 
----
+Available modes:
 
-# Supabase Setup
+| Command | Purpose |
+|---|---|
+| `python batterybin.py` | Normal mode: wait for a button press and process each detection cycle. |
+| `python batterybin.py --test` | Run a full detection cycle immediately without waiting for the button. |
+| `python batterybin.py --sync-only` | Attempt to upload pending items, then exit. |
+| `python batterybin.py --camera2 -1` | Use one camera instead of the default two-camera setup. |
+| `python batterybin.py --no-upload` | Run locally without uploading to Supabase. |
 
-## 5. Create a Supabase Project
+Other supported options include `--bin-dir`, `--camera`, `--resolution WxH`, `--autofocus on|off`, `--focus`, `--brightness`, `--sync-interval`, `--api-key`, `--supabase-url`, and `--supabase-key`. Run `python batterybin.py --help` to check the options supported by the version installed on your device.
 
-Create a Supabase account and create a new project.
+The second camera defaults to index `2`, matching the earlier listener configuration. Use `--camera2 -1` if you want to run with one camera. Camera indexes can differ between devices, so check the available `/dev/video*` devices if a camera cannot be opened.
 
----
+### Upload retry behaviour
 
-## 6. Configure the Database
+If a direct upload fails, the local photo/XML pair remains available for a later retry. While the system is idle, BatteryBin checks for pending uploads at the interval set by `--sync-interval` (default: 5 minutes). The `.uploaded_state.json` file tracks upload state and should not be committed to Git.
 
-Open the **SQL Editor** in Supabase.
+## Web interface and Supabase data
 
-Run the SQL contained in:
+Supabase stores the battery photos and associated identification data. The storage bucket is named `battery-photos`; the database structure is documented in `schema.sql` when that file is present in the repository.
 
-```text
-schema.sql
-```
+The project's `index.html` web interface can retrieve and display battery records from Supabase. If hosting it with GitHub Pages, configure the repository's Pages settings and ensure that any data access uses appropriate Supabase policies. Never put a privileged service-role key in client-side HTML or JavaScript.
 
-This will create the required database structure.
+## Troubleshooting
 
----
+### `gpiozero.exc.BadPinFactory: Unable to load any default pin factory!`
 
-## 7. Create the Storage Bucket
-
-Go to **Storage** in Supabase and create a new bucket.
-
-The bucket must be named exactly:
-
-```text
-battery-photos
-```
-
----
-
-## 8. Get Your Supabase Credentials
-
-Go to your Supabase project settings and find:
-
-* Project URL
-* Anon/Public API key
-
-Keep these values somewhere safe. They will be required when configuring the Raspberry Pi.
-
----
-
-# OpenAI Setup
-
-## 9. Create an OpenAI API Key
-
-Create an OpenAI API key and keep it somewhere secure.
-
-> **Important:** API usage requires billing/credits to be configured on your OpenAI account.
-
-Do **not** commit your API key to GitHub.
-
----
-
-# GitHub Pages Setup
-
-## 10. Create a GitHub Repository
-
-Create a GitHub repository that will host the project's web interface.
-
----
-
-## 11. Add `index.html`
-
-Add the provided:
-
-```text
-index.html
-```
-
-file to the GitHub repository.
-
-Enable **GitHub Pages** for the repository so that the webpage can be accessed through the internet.
-
-The webpage will retrieve battery information from Supabase and display it.
-
----
-
-# Configure Environment Variables
-
-Rather than putting API keys directly into the Python scripts, the project uses environment variables.
-
-On the Raspberry Pi, open your Bash configuration:
+Confirm that `lgpio` is installed in the same Python environment used to run the script:
 
 ```bash
-nano ~/.bashrc
+source python_env/bin/activate
+python -c "import lgpio; print('lgpio OK')"
 ```
 
-Add the following to the bottom of the file:
+To expose the underlying GPIO backend error, try:
 
 ```bash
-export OPENAI_API_KEY="sk-your-actual-key-here"
-export SUPABASE_URL="https://xxxxx.supabase.co"
-export SUPABASE_KEY="your-anon-public-key"
+GPIOZERO_PIN_FACTORY=lgpio python batterybin.py --test
 ```
 
-Save the file and reload your Bash configuration:
+### `error: command 'swig' failed: No such file or directory`
+
+Install the build dependencies, then retry the package installation:
 
 ```bash
-source ~/.bashrc
+sudo apt install swig liblgpio-dev python3-dev
+source python_env/bin/activate
+pip install lgpio
 ```
 
-You can check that the variables exist with:
+### Permission denied on `/dev/gpiochip*`
+
+Add the account running BatteryBin to the `gpio` group and log in again:
 
 ```bash
-echo $OPENAI_API_KEY
-echo $SUPABASE_URL
-echo $SUPABASE_KEY
+sudo usermod -aG gpio staff
 ```
 
-**Be careful when displaying your API key in a terminal or sharing screenshots.**
+Replace `staff` if your service runs under a different user.
 
----
+### The script works in a terminal but not as a service
 
-# Arduino Serial Port
-
-`python_listener.py` communicates with the Arduino through a serial connection.
-
-You will need to determine which serial port your Arduino is connected to.
-
-You can check connected USB devices with:
+Check that the service uses the same virtual environment where the dependencies were installed, that `WorkingDirectory` points to the project directory, and that `EnvironmentFile` points to the `.env` file. Review the service logs:
 
 ```bash
-lsusb
+sudo journalctl -u battery-listener -f
 ```
 
-You can also check available serial devices with:
+Use the correct unit name if it differs from `battery-listener`.
+
+### A camera cannot be opened
+
+Check which video devices are present:
 
 ```bash
-ls /dev/ttyUSB*
+ls /dev/video*
 ```
 
-or:
+Then test the camera indexes configured with `--camera` and `--camera2`. If only one webcam is connected or available, use `--camera2 -1`.
 
-```bash
-ls /dev/ttyACM*
-```
+### Uploads are failing
 
-For example, my Arduino was connected as:
+Check that `SUPABASE_URL` and `SUPABASE_KEY` are set correctly, that the `battery-photos` bucket exists, and that the configured key and Supabase policies permit the upload. Failed photo/XML pairs should remain in the local backlog for retry. Do not share API keys when posting logs for help.
 
-```text
-/dev/ttyUSB0
-```
+## Planned future improvements
 
-The serial port is configured in `python_listener.py`:
+These are possible future additions and are **not described as currently implemented**:
 
-```python
-SERIAL_PORT = "/dev/ttyUSB0"
-```
+- Digital scales to measure and record battery weight
+- Motion-activated lighting
+- An additional camera
+- Improved battery categorisation and more detailed battery history/statistics
+- Exploring a custom-trained YOLO model to identify damaged, swollen, or broken batteries
 
-Change this value if your Arduino is using a different port.
+## Contributing and maintenance
 
-For example:
-
-```python
-SERIAL_PORT = "/dev/ttyACM0"
-```
-
----
-
-# Camera Configuration
-
-The two webcams are identified by their camera indexes.
-
-You may need to determine which indexes Linux has assigned to your webcams.
-
-The `identify_battery.py` script is launched using arguments similar to:
-
-```bash
-python3 identify_battery.py --camera 0 --camera2 2 --upload
-```
-
-In this example:
-
-* `--camera 0` → Camera 1
-* `--camera2 2` → Camera 2
-* `--upload` → Upload the captured images to Supabase
-
-Your camera indexes may be different.
-
-For example, your cameras could be:
-
-```bash
-python3 identify_battery.py --camera 1 --camera2 3 --upload
-```
-
-Use the available `/dev/video*` devices to help determine which cameras are connected.
-
----
-
-# Running the System
-
-Once everything is configured, the general workflow is:
-
-```text
-           ┌──────────────┐
-           │ Arduino Mega │
-           └──────┬───────┘
-                  │
-             Button Press
-                  │
-                  ▼
-        ┌───────────────────┐
-        │ python_listener.py│
-        └─────────┬─────────┘
-                  │
-                  ▼
-        ┌───────────────────┐
-        │ identify_battery  │
-        │       .py         │
-        └─────────┬─────────┘
-                  │
-          ┌───────┴───────┐
-          ▼               ▼
-     ┌─────────┐     ┌─────────┐
-     │ Camera 1│     │ Camera 2│
-     └────┬────┘     └────┬────┘
-          │               │
-          └───────┬───────┘
-                  │
-                  ▼
-          ┌──────────────┐
-          │    OpenAI    │
-          │    Vision    │
-          └──────┬───────┘
-                 │
-                 ▼
-          Battery detected
-                 │
-                 ▼
-          ┌──────────────┐
-          │   Supabase   │
-          └──────┬───────┘
-                 │
-                 ▼
-          ┌──────────────┐
-          │  GitHub Page │
-          │  index.html  │
-          └──────────────┘
-```
-
----
-
-# Project Structure
-
-The project will generally look something like:
-
-```text
-BatteryBin/
-├── python_listener.py
-├── identify_battery.py
-├── schema.sql
-├── index.html
-├── README.md
-└── .venv/
-```
-
----
-
-# Future Development
-
-This project is still under development.
-
-Future versions will focus on making the system more automated and improving the amount of information recorded for each battery.
-
-Potential additions include:
-
-* Battery weight measurement
-* Automatic battery sorting
-* Solenoid-controlled trap door using a 12V solenoid and MOSFET driver
-* Motion detection
-* Automatic lighting
-* Additional cameras
-* Larger LCD display
-* More detailed battery information
-* Battery history and statistics
-* Improved AI identification
-* Automatic battery type categorisation
-
----
-
-
+BatteryBin is under development. When changing hardware or software, update this README to reflect the tested behaviour and current wiring. Keep credentials and local upload-state files out of version control.
